@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Reel stash</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A41">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#EEF2F6;--card:#fff;--ink:#1B2A41;--mute:#5d6b7e;--line:#d5dde7;--acc:#2F5BEA;--accfg:#fff;--tool:#0f7b6c;--tech:#b4540a;--idea:#7a3fc4}
+@media(prefers-color-scheme:dark){:root{--bg:#121a26;--card:#1b2636;--ink:#e8eef6;--mute:#9aa8bb;--line:#2b3a50;--acc:#7c9bff;--accfg:#0d1522;--tool:#4fd1bd;--tech:#f0a15c;--idea:#c39bff}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+h1{font-size:1.5rem;margin:20px 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 16px}
+.panel,.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+label{display:block;font-weight:600;font-size:.9rem;margin:10px 0 4px}
+input[type=text],textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+textarea{min-height:76px;resize:vertical}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 14px}
+button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600;width:100%;margin-top:12px;padding:12px}
+.chip{border-radius:999px;padding:6px 12px;font-size:.9rem}
+.chip[aria-pressed=true],.tab[aria-selected=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tabs{display:flex;gap:6px;margin:20px 0 10px}
+.tab{flex:1;padding:9px 6px}
+.list{display:grid;gap:10px;margin-top:12px}
+.card .note{margin:6px 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.meta{display:flex;gap:10px;align-items:center;color:var(--mute);font-size:.85rem;flex-wrap:wrap}
+.tag{font-weight:700}
+.tag.tool{color:var(--tool)}.tag.tech{color:var(--tech)}.tag.idea{color:var(--idea)}
+.card a.open{color:var(--acc);font-weight:600;overflow-wrap:anywhere}
+.acts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.acts button{padding:6px 10px;font-size:.88rem}
+.hide{display:none!important}
+.tag.prod{color:var(--acc)}
+.pname{font-weight:700;margin:2px 0 0}
+.prod-row{margin:4px 0 0;font-size:.92rem;color:var(--mute)}
+.empty{color:var(--mute);text-align:center;padding:28px 8px}
+footer{margin-top:28px;display:flex;gap:8px;flex-wrap:wrap}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+@media(prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<h1>Reel stash</h1>
+<p class="sub">Save the link and the reason you saved it.</p>
+
+<form class="panel" id="f" autocomplete="off">
+  <label for="url" id="ul">Reel link</label>
+  <div class="row">
+    <input class="grow" type="text" id="url" inputmode="url" placeholder="https://" required>
+    <button type="button" id="paste">Paste</button>
+  </div>
+  <label for="purl">Product link (optional)</label>
+  <input type="text" id="purl" inputmode="url" placeholder="If the creator shared one">
+  <label for="note" id="nl">Why did you save this?</label>
+  <textarea id="note" placeholder="e.g. Zoom transition to try in the next What If short" required></textarea>
+  <div id="typeBox"><label id="bl">Type</label>
+  <div class="row" role="group" aria-labelledby="bl" id="bpick"></div></div>
+  <button class="primary" type="submit">Save</button>
+</form>
+
+<div class="tabs" role="tablist" id="tabs"></div>
+<div class="row" id="filters" role="group" aria-label="Filter by type"></div>
+<input type="text" id="q" placeholder="Search notes and links" style="margin-top:10px" aria-label="Search">
+<div class="list" id="list"></div>
+
+<footer>
+  <button id="exp">Export backup</button>
+  <button id="imp">Import backup</button>
+  <input type="file" id="file" accept="application/json" hidden>
+</footer>
+<div id="toast" role="status"></div>
+
+<script>
+const KEY = 'reelstash.v1';
+const BUCKETS = {tool: 'Tools and sites', tech: 'Editing techniques', idea: 'Content ideas'};
+const SHORT = {tool: 'Tool', tech: 'Technique', idea: 'Idea'};
+const STATUS = {new: 'To review', tried: 'Tried', archived: 'Archived'};
+let items = [];
+try { items = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
+let view = 'new', bucket = 'all', q = '', pick = 'tech';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 2200); }
+function persist() { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) { toast('Could not save. Browser storage is blocked or full.'); } }
+function firstUrl(s) { const m = (s || '').match(/https?:\/\/[^\s]+/); return m ? m[0] : ''; }
+function host(u) { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } }
+
+function drawPick() {
+  $('#bpick').innerHTML = Object.entries(BUCKETS).map(([k, v]) => `<button type="button" class="chip" data-k="${k}" aria-pressed="${k === pick}">${v}</button>`).join('');
+}
+$('#bpick').onclick = e => { const k = e.target.dataset.k; if (k) { pick = k; drawPick(); } };
+
+function render() {
+  $('#tabs').innerHTML = Object.entries(STATUS).map(([k, v]) => `<button class="tab" role="tab" data-v="${k}" aria-selected="${k === view}">${v} (${items.filter(i => i.status === k).length})</button>`).join('');
+  $('#filters').innerHTML = [['all', 'All types'], ...Object.entries(BUCKETS)].map(([k, v]) => `<button class="chip" data-b="${k}" aria-pressed="${k === bucket}">${v}</button>`).join('');
+  const needle = q.trim().toLowerCase();
+  let rows = items.filter(i => i.status === view && (bucket === 'all' || i.bucket === bucket) && (!needle || ((i.name || '') + ' ' + i.note + ' ' + i.url + ' ' + (i.product || '')).toLowerCase().includes(needle)));
+  rows.sort((a, b) => view === 'new' ? a.saved - b.saved : b.saved - a.saved);
+  $('#list').innerHTML = rows.length ? rows.map(i => `
+    <article class="card" data-id="${i.id}">
+      ${i.name ? `<p class="pname">${esc(i.name)}</p>` : ''}
+      <a class="open" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(host(i.url))}</a>
+      ${i.product ? `<p class="prod-row">Product: <a class="open" href="${esc(i.product)}" target="_blank" rel="noopener noreferrer">${esc(host(i.product))}</a></p>` : ''}
+      <p class="note">${esc(i.note)}</p>
+      <div class="meta"><span class="tag ${i.bucket || 'prod'}">${SHORT[i.bucket] || 'Product'}</span><span>${new Date(i.saved).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'})}</span></div>
+      <div class="acts">
+        ${i.status === 'new' ? '<button data-a="tried">Tried it</button><button data-a="archived">Archive</button>' : '<button data-a="new">Back to review</button>'}
+        <button data-a="plink">${i.product ? 'Edit product link' : 'Add product link'}</button>
+        <button data-a="edit">Edit note</button><button data-a="del">Delete</button>
+      </div>
+    </article>`).join('') : `<div class="empty">${view === 'new' ? 'Nothing to review. Save a reel above.' : 'Nothing here yet.'}</div>`;
+}
+$('#tabs').onclick = e => { const v = e.target.dataset.v; if (v) { view = v; render(); } };
+$('#filters').onclick = e => { const b = e.target.dataset.b; if (b) { bucket = b; render(); } };
+$('#q').oninput = e => { q = e.target.value; render(); };
+$('#list').onclick = e => {
+  const a = e.target.dataset.a; if (!a) return;
+  const card = e.target.closest('.card'), it = items.find(x => x.id === card.dataset.id);
+  if (a === 'del') { if (!confirm('Delete this save?')) return; items = items.filter(x => x !== it); }
+  else if (a === 'edit') { const n = prompt('Edit note', it.note); if (n === null || !n.trim()) return; it.note = n.trim(); }
+  else if (a === 'plink') { const p = prompt('Product link the creator shared (leave empty to remove)', it.product || ''); if (p === null) return; it.product = firstUrl(p) || p.trim(); }
+  else it.status = a;
+  persist(); render();
+};
+
+$('#f').onsubmit = e => {
+  e.preventDefault();
+  const url = firstUrl($('#url').value) || $('#url').value.trim(), note = $('#note').value.trim();
+  if (!url || !note) return;
+  if (items.some(i => i.url === url)) toast('Already saved. Added again with the new note.');
+  const pv = $('#purl').value.trim();
+  items.push({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), url, note, product: firstUrl(pv) || pv, bucket: pick, status: 'new', saved: Date.now()});
+  persist(); e.target.reset(); view = 'new'; render(); toast('Saved');
+};
+$('#paste').onclick = async () => {
+  try { const t = await navigator.clipboard.readText(); $('#url').value = firstUrl(t) || t; $('#note').focus(); }
+  catch (e) { toast('Paste blocked. Long-press the field and paste.'); }
+};
+
+$('#exp').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(items, null, 2)], {type: 'application/json'}));
+  a.download = 'reel-stash-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+};
+$('#imp').onclick = () => $('#file').click();
+$('#file').onchange = async e => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text()), ids = new Set(items.map(i => i.id));
+    const add = data.filter(i => i && i.id && i.url && !ids.has(i.id));
+    items = items.concat(add); persist(); render(); toast('Imported ' + add.length + ' saves');
+  } catch (err) { toast('That file is not a Reel stash backup.'); }
+  e.target.value = '';
+};
+
+// Opened from the phone's share sheet: prefill the link, jump to the note.
+const sp = new URLSearchParams(location.search);
+if (sp.has('url') || sp.has('text') || sp.has('title')) {
+  $('#url').value = firstUrl(sp.get('url')) || firstUrl(sp.get('text')) || firstUrl(sp.get('title')) || '';
+  history.replaceState(null, '', location.pathname);
+  $('#note').focus();
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+drawPick(); render();
+</script>
+</body>
+</html>
